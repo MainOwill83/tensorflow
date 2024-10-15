@@ -39,7 +39,10 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/OwningOpRef.h"  // from @llvm-project
+#include "mlir/IR/SymbolTable.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
+#include "tensorflow/compiler/mlir/tensorflow/utils/dump_mlir_util.h"
 #include "tensorflow/compiler/mlir/tfrt/transforms/ifrt/extract_callback.h"
 #include "tensorflow/compiler/mlir/tfrt/transforms/ifrt/ifrt_types.h"
 #include "tensorflow/compiler/mlir/tfrt/transforms/ifrt/tf2hlo.h"
@@ -185,6 +188,25 @@ absl::StatusOr<std::vector<xla::ifrt::Device*>> GetAssignedDevices(
                                 device_assignment_attr_val);
 }
 
+absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> GetNewModuleWithoutHostFunc(
+    mlir::ModuleOp module) {
+  mlir::OwningOpRef<mlir::ModuleOp> copy =
+      mlir::OwningOpRef<mlir::ModuleOp>(module.clone());
+  llvm::DenseSet<mlir::TF::XlaHostComputeOp> xla_host_compute_ops;
+  copy->walk(
+      [&](mlir::TF::XlaHostComputeOp op) { xla_host_compute_ops.insert(op); });
+  for (auto& op : xla_host_compute_ops) {
+    auto func = mlir::SymbolTable::lookupNearestSymbolFrom<mlir::func::FuncOp>(
+        *copy, op.getKeyAttr());
+    if (!func) {
+      return absl::InternalError(
+          absl::StrCat("symbol not found: ", op.getKey().str()));
+    }
+    func->erase();
+  }
+  return copy;
+}
+
 }  // namespace
 
 absl::StatusOr<std::unique_ptr<IfrtServingExecutable>>
@@ -199,7 +221,7 @@ IfrtServingExecutable::Create(
     tensorflow::DeviceMgr* device_mgr,
     tensorflow::XlaHelpers::ShapeRepresentationFn shape_representation_fn,
     IfrtServingCoreSelector* ifrt_serving_core_selector,
-    tsl::protobuf::Message* compilation_environement_proto,
+    tsl::protobuf::Message* compilation_environment_proto,
     IfrtPersistentCompilationCache* persistent_compilation_cache) {
   TF_ASSIGN_OR_RETURN(
       tensorflow::tpu::TPUCompileMetadataProto original_compile_metadata,
@@ -219,7 +241,7 @@ IfrtServingExecutable::Create(
       std::move(original_compile_metadata),
       xla::ifrt::BasicDeviceList::Create(xla::ifrt::BasicDeviceList::Devices(
           assigned_devices.begin(), assigned_devices.end())),
-      compilation_environement_proto, persistent_compilation_cache));
+      compilation_environment_proto, persistent_compilation_cache));
 
   return executable;
 }
@@ -377,11 +399,20 @@ IfrtServingExecutable::CreateExecutableSynchronously(
     mlir::OwningOpRef<mlir::ModuleOp> module_copy,
     const tensorflow::tpu::TPUCompileMetadataProto& compile_metadata,
     absl::Span<const DtypeAndShape> dtypes_and_shapes) {
+  TF_ASSIGN_OR_RETURN(auto module_for_tf2xla,
+                      GetNewModuleWithoutHostFunc(*module_copy));
+  if (VLOG_IS_ON(1)) {
+    tensorflow::DumpMlirOpToFile("module_for_tf2xla", *module_for_tf2xla);
+  }
   TF_ASSIGN_OR_RETURN(
       Tf2HloResult tf2hlo_result,
-      CompileTfToHlo(*module_copy, dtypes_and_shapes, signature_name(),
+      CompileTfToHlo(*module_for_tf2xla, dtypes_and_shapes, signature_name(),
                      *ifrt_client_, compile_metadata,
                      shape_representation_fn_));
+  if (VLOG_IS_ON(1)) {
+    tensorflow::DumpMlirOpToFile("hlo_program",
+                                 tf2hlo_result.mlir_hlo_module.get());
+  }
   const int num_replicas = tf2hlo_result.compile_metadata.num_replicas();
   const int num_partitions =
       tf2hlo_result.compile_metadata.num_cores_per_replica();
