@@ -34,6 +34,9 @@ limitations under the License.
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 
+#define GET_ATTRDEF_CLASSES
+#include "xla/service/gpu/fusions/triton/xla_triton_attrs.cc.inc"
+
 using mlir::Dialect;
 using mlir::DictionaryAttr;
 using mlir::Location;
@@ -53,6 +56,10 @@ void XlaTritonDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
 #include "xla/service/gpu/fusions/triton/xla_triton_ops.cc.inc"
+      >();
+  addAttributes<
+#define GET_ATTRDEF_LIST
+#include "xla/service/gpu/fusions/triton/xla_triton_attrs.cc.inc"
       >();
 }
 
