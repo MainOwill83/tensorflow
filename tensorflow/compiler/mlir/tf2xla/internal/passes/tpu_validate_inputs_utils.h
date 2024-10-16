@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_MLIR_TF2XLA_INTERNAL_PASSES_TPU_VALIDATE_INPUTS_UTILS_H_
 
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_executor.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/attribute_utils.h"
 
@@ -32,8 +33,11 @@ using mlir::StringAttr;
 using mlir::TypeID;
 using mlir::TF::InfeedDequeueTupleOp;
 using mlir::TF::kDeviceAttr;
+using mlir::tf_executor::GraphOp;
 
 bool IsPotentialUnsupportedOp(Operation* op);
+
+bool hasV1ControlFlow(GraphOp graph);
 
 }  // namespace internal
 }  // namespace tf2xla

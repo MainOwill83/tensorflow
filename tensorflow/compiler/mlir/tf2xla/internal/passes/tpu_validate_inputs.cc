@@ -618,6 +618,16 @@ void TPUValidateInputsPass::runOnOperation() {
       signalPassFailure();
     }
   });
+
+  module.walk([&](GraphOp graph) {
+    if (hasV1ControlFlow(graph)) {
+      LOG(ERROR) << "TF2XLA MLIR bridge does not support v1 control flow.";
+      success = false;
+    }
+    if (!success) {
+      signalPassFailure();
+    }
+  });
 }
 
 }  // anonymous namespace
